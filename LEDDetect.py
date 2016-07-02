@@ -4,6 +4,7 @@ file: detectLED.py
 function: detect LED and return center points of the led
 Written by Shayle Murray
 Last Updated: June 22, 2016
+GITHUB: https://github.com/LikeTheRock/PoseEstimation
 '''
 
 #IMPORTS
@@ -11,6 +12,8 @@ import cv2
 import numpy as np
 import glob
 import os
+from scipy.spatial import distance
+import math
 
 #CONSTANTS
 H_MIN = 0
@@ -29,6 +32,20 @@ WINDOWNAME2 = "Thresholded Image"
 WINDOWNAME1 = "Hough Circles"
 WINDOWNAME3 = "Contour Image"
 MAX_RADIUS = 1 
+NUM_LEDS = 3 #The number of points(LEDs) to track
+GREEN = (0,255,0)
+RED = (0,0,255)
+
+#COMMAND SETS
+CSET1 = '''Current Command Options:
+	'ESC' - Quit
+	'p'   - Pause vid feed & select ROI's
+	'r'   - Resume vid feed'''
+	
+CSET2 = '''Current Command Options:
+	Click radius point - hold & drag to center - release
+	'r'   - reset all ROI selections
+	'c'   - ROI selection complete'''
 
 #CLASS 
 '''
@@ -74,6 +91,9 @@ selectPath = 1 # 0 is loop all vids, 1-3 => PATH()
 picFrame = 50 #Select the frame to view from one of the paths
 pathTemp = PATH1
 resize = 1
+refPoints = [] #Capture points for the ROI will be set of (x,y))
+circleROI = [] #set of circles which are the ROIs
+#image = 0#a blank image to be used in ROI capture
 
 #FUNCTIONS
 def nothing(x):
@@ -152,9 +172,9 @@ def detectCircles( cameraFeed,threshold ):
 	circles2 = np.uint16(np.around(circles))
 	for i in circles2[0,:]:
 		# draw the outer circle
-		cv2.circle(cCameraFeed,(i[0],i[1]),i[2],(0,255,0),2)
+		cv2.circle(cCameraFeed,(i[0],i[1]),i[2],GREEN,2)
 		# draw the center of the circle
-		cv2.circle(cCameraFeed,(i[0],i[1]),2,(0,0,255),3)
+		cv2.circle(cCameraFeed,(i[0],i[1]),2,RED,3)
 	return cCameraFeed
 
 '''
@@ -179,7 +199,7 @@ def contourTrack(cameraFeed, threshold):
 	
 	#Draw All Contours
 	#DrawContours(source image,the contours as a Python list, index of contours (useful when drawing individual contour. To draw all contours, pass -1) and remaining arguments are color, thickness etc.
-	#cv2.drawContours(contouredFeed, contours, -1, (0,255,0), 3)
+	#cv2.drawContours(contouredFeed, contours, -1, GREEN, 3)
 	
 	#Draw Contours Smaller than Max_Radius
 	center = (0,0)
@@ -189,15 +209,16 @@ def contourTrack(cameraFeed, threshold):
 		if radius < MAX_RADIUS and radius > .5: #TODO Adjust this 
 			center = (int(x),int(y))
     		radius = int(radius)
-    		cv2.circle(contouredFeed,center,radius,(0,255,0),1)
+    		cv2.circle(contouredFeed,center,radius,GREEN,1)
 	
 	#Create & show window with result'''
 	showWindow(WINDOWNAME3, contouredFeed, resize)
 
-'''
-	Takes two feeds and highlights the difference in a new window
-'''
 def compareFeed( feedOne, feedTwo, feedOneName, FeedTwoName):
+	'''
+		Takes two feeds and highlights the difference in a new window
+	'''
+		#TODO finish this, does not add to blue & red masks
 	#get dimension of feeds
 	f1x, f1y = feedOne.shape[:2]
 	f1x, f1y = feedOne.shape[:2]
@@ -207,7 +228,7 @@ def compareFeed( feedOne, feedTwo, feedOneName, FeedTwoName):
 	redMask = np.zeros((f1x,f1y,3), np.uint8)
 	blackMask = np.zeros((f1x,f1y,3), np.uint8)
 	blueMask[:]=(255,0,0)
-	redMask[:]=(0,0,255)
+	redMask[:] = RED
 	blackMask[:]=(0,0,0)
 	
 	#Subtract a from b, and vise versa (xor)
@@ -227,12 +248,82 @@ def compareFeed( feedOne, feedTwo, feedOneName, FeedTwoName):
 	showWindow(title, blueMask ,resize)
 	#showWindow(title, blackMask,resize)
 
+def click_ROI(event, x, y, flags, param):
+	'''
+		Captures the mouse position, calculates & draws a circleROI on the original image
+	'''
+		#TODO try removing extra parameters
+	radius=0
+	#TODO make this select circles 
+	#TODO remove dependancies on global var
+	# grab references to the global variables
+	global refPoints, circleROI
+
+	# if the left mouse button was clicked, record the starting (x, y) coordinates 
+	if event == cv2.EVENT_LBUTTONDOWN:
+		refPoints = [(x, y)]
+
+	# check to see if the left mouse button was released
+	elif event == cv2.EVENT_LBUTTONUP:
+		# record the ending (x, y) coordinates 
+		refPoints.append((x,y))
+		
+		#calculate radius and cast as interger
+		radius = int(math.ceil( distance.euclidean(refPoints[0], refPoints[1]) ) )
+		
+		#Add circle to circleROI
+		circleROI.append((x,y,radius))
+		
+		# draw a circle around the region of interest
+		#cv2.circle(image, refPoints[0], radius, GREEN, 2)
+		#cv2.imshow("image", image)
+
 def identifyROI(circles):
 	'''
-		Identifies possible matches for tracking
+		updates the ROIs and
+		Draws shapes around the ROIs on the original image 
 	'''
-	pass
+	pass #TODO
+	
+def userDefineROI(image, winName): 
+	'''
+		Has the user draw circles on the stil frame to initialize
+		tracking of the ROI. 
+	'''	
+	#TODO How to do this on the original image
+	#clone image, and setup the mouse callback function
+	global circleROI
+	clone = image.copy()
+	winNameNew = winName + " ROI Select"
+	cv2.namedWindow(winNameNew)
+	cv2.setMouseCallback(winNameNew, click_ROI) 
+	pastLenth = 0 #Past length of ROICircle
 
+	# keep looping until the 'q' key is pressed
+	while True:
+		# display the image and wait for a keypress
+		cv2.imshow(winNameNew, image) #Why is this image, and not clone
+		key = cv2.waitKey(1) & 0xFF
+		
+		if pastLenth < len(circleROI):
+			#draw circle
+			cv2.circle(image, circleROI[pastLenth][0:2], circleROI[pastLenth][2], GREEN, 2)
+			pastLenth +=1
+		
+		# if the 'r' key is pressed, reset the ROI
+		if key == ord("r"):
+			image = clone.copy()
+			circleROI = 0 
+			pastLen = 0
+
+		# if the 'c' key is pressed, break from the loop
+		elif key == ord("c"):
+			break
+
+	if len(circleROI) == NUM_LEDS:
+		cv2.destroyWindow(winNameNew)
+
+	
 '''
 Select the method of input. 
 	-Video from bmp's in folder
@@ -250,6 +341,7 @@ createBars()
 
 # start an infinite loop to loop through all images
 c=0 #initialize counter
+print CSET1
 while(1):
 	#TODO implement if block to select imput method
 	c+=1
@@ -258,6 +350,8 @@ while(1):
 		# capture the frame
 		cameraFeed = cv2.imread( nextBmp ,1 )
 		
+		#TODO Put all of this in a method, that can be opened with an input
+		#	Update command set to include option
 		# Get trackbar positions
 		colorFilter.H_MIN = cv2.getTrackbarPos("H_MIN",TRACKBARWINDOWNAME)
 		colorFilter.H_MAX = cv2.getTrackbarPos("H_MAX",TRACKBARWINDOWNAME)
@@ -302,6 +396,8 @@ while(1):
 		k = cv2.waitKey(30) & 0xFF
 		if k == 112 : #p pause
 			#TODO click the LEDS
+			print CSET2
+			userDefineROI(cameraFeed, WINDOWNAME)
 			while(k != 114):
 				#wait till new key == r
 				k = cv2.waitKey(30) & 0xFF
